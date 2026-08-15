@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LangGraph inside Snowflake — Architecture</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg-soft: #111834;
+    --ink: #0f172a;
+    --snow: #29b5a8;
+    --snow-2: #11a8dd;
+    --purple: #7c3aed;
+    --purple-2: #a855f7;
+    --amber: #f59e0b;
+    --green: #16a34a;
+    --pink: #db2777;
+    --blue: #2563eb;
+    --card: rgba(255, 255, 255, 0.06);
+    --stroke: rgba(255, 255, 255, 0.14);
+    --muted: #9fb0d0;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: radial-gradient(1200px 700px at 15% -10%, #17224a 0%, transparent 55%),
+                radial-gradient(1000px 700px at 110% 10%, #10233f 0%, transparent 55%),
+                var(--bg);
+    color: #eaf0ff;
+    font-family: "Segoe UI", Inter, system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .frame {
+    width: 1120px;
+    margin: 40px auto;
+    padding: 40px 44px 48px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+    border: 1px solid var(--stroke);
+    border-radius: 28px;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.55);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(600px 300px at 90% 0%, rgba(124,58,237,0.18), transparent 60%),
+      radial-gradient(600px 300px at 0% 100%, rgba(41,181,168,0.18), transparent 60%);
+    pointer-events: none;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 14px;
+    border: 1px solid var(--stroke);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  h1 {
+    margin: 18px 0 6px;
+    font-size: 40px;
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+  }
+
+  h1 .accent {
+    background: linear-gradient(90deg, var(--snow), var(--snow-2) 40%, var(--purple-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .sub {
+    color: var(--muted);
+    font-size: 17px;
+    max-width: 760px;
+    margin: 6px 0 26px;
+  }
+
+  .layer {
+    position: relative;
+    border: 1px solid var(--stroke);
+    border-radius: 20px;
+    padding: 18px 20px 20px;
+    margin: 0 0 16px;
+    background: var(--card);
+    backdrop-filter: blur(4px);
+  }
+
+  .layer .layer-tag {
+    position: absolute;
+    top: -12px;
+    left: 22px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 999px;
+    color: #fff;
+    font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+
+  .tag-exp { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+  .tag-snow { background: linear-gradient(90deg, #0f766e, var(--snow)); }
+  .tag-run { background: linear-gradient(90deg, #6d28d9, var(--purple-2)); }
+  .tag-data { background: linear-gradient(90deg, #166534, var(--green)); }
+
+  .row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .card {
+    flex: 1 1 0;
+    min-width: 200px;
+    border-radius: 16px;
+    padding: 16px 16px 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+    border: 1px solid var(--stroke);
+    position: relative;
+    transition: transform 0.2s ease;
+  }
+
+  .card:hover { transform: translateY(-3px); }
+
+  .card .ic {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    font-size: 20px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255,255,255,0.18);
+  }
+
+  .card h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+
+  .card p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  .glow-snow .ic { background: rgba(41,181,168,0.16); box-shadow: 0 0 24px rgba(41,181,168,0.35) inset; }
+  .glow-blue .ic { background: rgba(37,99,235,0.16); box-shadow: 0 0 24px rgba(37,99,235,0.35) inset; }
+  .glow-purple .ic { background: rgba(124,58,237,0.18); box-shadow: 0 0 24px rgba(124,58,237,0.40) inset; }
+  .glow-pink .ic { background: rgba(219,39,119,0.16); box-shadow: 0 0 24px rgba(219,39,119,0.35) inset; }
+  .glow-green .ic { background: rgba(22,163,74,0.16); box-shadow: 0 0 24px rgba(22,163,74,0.35) inset; }
+  .glow-amber .ic { background: rgba(245,158,11,0.16); box-shadow: 0 0 24px rgba(245,158,11,0.35) inset; }
+
+  .flow-arrow {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: 22px;
+    margin: -4px 0 12px;
+  }
+
+  .controller {
+    border: 1px solid rgba(168,85,247,0.5);
+    box-shadow: 0 0 0 1px rgba(168,85,247,0.25), 0 20px 60px rgba(124,58,237,0.25);
+    background: linear-gradient(180deg, rgba(124,58,237,0.20), rgba(124,58,237,0.05));
+  }
+
+  .controller h3 { font-size: 18px; }
+
+  .pill-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #f3e8ff;
+    background: rgba(124,58,237,0.28);
+    border: 1px solid rgba(168,85,247,0.5);
+    padding: 6px 12px;
+    border-radius: 999px;
+  }
+
+  /* Decision strip */
+  .decision {
+    margin-top: 26px;
+    border-radius: 20px;
+    border: 1px solid var(--stroke);
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    padding: 22px;
+  }
+
+  .decision h2 {
+    margin: 0 0 16px;
+    font-size: 20px;
+  }
+
+  .steps {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    flex-wrap: nowrap;
+  }
+
+  .step {
+    flex: 1;
+    border-radius: 14px;
+    padding: 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--stroke);
+    text-align: center;
+    font-size: 13px;
+    color: #eaf0ff;
+  }
+
+  .step .big { font-size: 15px; font-weight: 700; display: block; margin-top: 4px; }
+  .step small { color: var(--muted); }
+
+  .step.q { border-color: rgba(37,99,235,0.5); }
+  .step.plan { border-color: rgba(124,58,237,0.5); }
+  .step.gate { border-color: rgba(245,158,11,0.5); }
+  .step.exec { border-color: rgba(219,39,119,0.5); }
+  .step.win {
+    border-color: rgba(22,163,74,0.7);
+    background: linear-gradient(180deg, rgba(22,163,74,0.22), rgba(22,163,74,0.06));
+  }
+
+  .arrow { display: grid; place-items: center; color: var(--muted); font-size: 20px; min-width: 22px; }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 26px;
+    padding-top: 18px;
+    border-top: 1px solid var(--stroke);
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .brandline { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .chip {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--stroke);
+    background: rgba(255,255,255,0.04);
+    font-size: 12px;
+    color: #dbe6ff;
+  }
+
+  .tagline {
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(90deg, var(--snow), var(--purple-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 15px;
+  }
+
+  @media (max-width: 1180px) {
+    .frame { width: auto; margin: 20px; }
+    .steps { flex-wrap: wrap; }
+    .arrow { display: none; }
+    .step { flex: 1 1 40%; }
+  }
+
+  .download-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--snow), var(--purple-2));
+    box-shadow: 0 10px 30px rgba(124,58,237,0.35);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+
+  .download-btn:hover { transform: translateY(-2px); }
+  .download-btn:active { transform: translateY(0); }
+  .download-btn[disabled] { opacity: 0.6; cursor: progress; }
+
+  @media print { .download-btn { display: none; } }
+</style>
+</head>
+<body>
+  <button class="download-btn" id="downloadBtn" onclick="downloadPng()">⬇️ Download PNG</button>
+  <div class="frame">
+    <span class="eyebrow">❄️ Snowflake · 🕸️ LangGraph · 🔌 MCP</span>
+    <h1>LLM interprets. <span class="accent">LangGraph controls.</span></h1>
+    <p class="sub">
+      Native, tightly governed AI workflow orchestration inside Snowflake — where Cortex Agent is the
+      front door and LangGraph owns the execution path, instead of controlling orchestration through
+      agent instructions.
+    </p>
+
+    <!-- EXPERIENCE -->
+    <div class="layer">
+      <span class="layer-tag tag-exp">Experience Layer</span>
+      <div class="row">
+        <div class="card glow-blue">
+          <div class="ic">👤</div>
+          <h3>User in Co-Work</h3>
+          <p>Asks a natural-language question. No knowledge of tools or routing required.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow">↓</div>
+
+    <!-- SNOWFLAKE INTELLIGENCE -->
+    <div class="layer">
+      <span class="layer-tag tag-snow">Snowflake Intelligence</span>
+      <div class="row">
+        <div class="card glow-snow">
+          <div class="ic">🤖</div>
+          <h3>Cortex Agent</h3>
+          <p>Conversational entry point. Calls one governed workflow — it does not improvise tools.</p>
+        </div>
+        <div class="card glow-snow">
+          <div class="ic">🔌</div>
+          <h3>MCP Interface</h3>
+          <p>A single public workflow tool. Clean boundary between Cortex and the application.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow">↓</div>
+
+    <!-- RUNTIME -->
+    <div class="layer">
+      <span class="layer-tag tag-run">Snowpark Container Services · Runtime</span>
+
+      <div class="row">
+        <div class="card controller glow-purple">
+          <div class="ic">🕸️</div>
+          <h3>LangGraph Controller</h3>
+          <p>Owns workflow state, branching, retries, and approvals. The single source of control.</p>
+          <span class="pill-note">⚡ Deterministic, graph-defined execution</span>
+        </div>
+      </div>
+
+      <div class="flow-arrow">↓</div>
+
+      <div class="row">
+        <div class="card glow-purple">
+          <div class="ic">🧠</div>
+          <h3>ChatSnowflake Planner</h3>
+          <p>Snowflake Cortex LLM interprets intent — used for understanding, not control.</p>
+        </div>
+        <div class="card glow-purple">
+          <div class="ic">📐</div>
+          <h3>Structured Route</h3>
+          <p>Planner output is constrained to a strict Pydantic schema of approved actions.</p>
+        </div>
+        <div class="card glow-amber">
+          <div class="ic">🛡️</div>
+          <h3>Validation Gate</h3>
+          <p>Only approved tools and valid arguments pass. Everything else is rejected.</p>
+        </div>
+        <div class="card glow-pink">
+          <div class="ic">⚙️</div>
+          <h3>Controlled Execution</h3>
+          <p>Runs the graph-defined workflow — no free-form tool calling.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow">↓</div>
+
+    <!-- DATA PLANE -->
+    <div class="layer">
+      <span class="layer-tag tag-data">Snowflake Data &amp; Tools</span>
+      <div class="row">
+        <div class="card glow-green">
+          <div class="ic">🧩</div>
+          <h3>Private Tools</h3>
+          <p>Internal Python functions, invisible to the agent and callable only via the graph.</p>
+        </div>
+        <div class="card glow-green">
+          <div class="ic">🗄️</div>
+          <h3>Snowflake SQL &amp; Data</h3>
+          <p>Governed data access with Snowflake identity, permissions, and auditability.</p>
+        </div>
+        <div class="card glow-green">
+          <div class="ic">✅</div>
+          <h3>Validated Result</h3>
+          <p>A predictable, explainable answer returned to Cortex Agent, then to the user.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- DECISION EXAMPLE -->
+    <div class="decision">
+      <h2>🔎 One request, fully controlled</h2>
+      <div class="steps">
+        <div class="step q">
+          <small>User asks</small>
+          <span class="big">“5 rows × 100 columns — how many cells?”</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step plan">
+          <small>LLM planner</small>
+          <span class="big">route → multiply</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step gate">
+          <small>Validation</small>
+          <span class="big">a = 5, b = 100</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step exec">
+          <small>Execute</small>
+          <span class="big">multiply(5, 100)</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="step win">
+          <small>Result</small>
+          <span class="big">500 ✅</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="brandline">
+        <span class="chip">❄️ Cortex Agent</span>
+        <span class="chip">🔌 MCP</span>
+        <span class="chip">🕸️ LangGraph</span>
+        <span class="chip">🧠 ChatSnowflake</span>
+        <span class="chip">📦 Snowpark Container Services</span>
+      </div>
+      <div class="tagline">Interpretation by the LLM · Execution by the graph</div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script>
+    async function downloadPng() {
+      const btn = document.getElementById('downloadBtn');
+      const frame = document.querySelector('.frame');
+      if (typeof html2canvas !== 'function') {
+        alert('Image library failed to load. Check your internet connection, then try again.');
+        return;
+      }
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Rendering...';
+      try {
+        const canvas = await html2canvas(frame, {
+          scale: 2,
+          backgroundColor: '#0b1020',
+          useCORS: true,
+        });
+        const link = document.createElement('a');
+        link.download = 'langgraph-in-snowflake-architecture.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } catch (err) {
+        alert('Could not generate PNG: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+  </script>
+</body>
+</html>

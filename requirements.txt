@@ -1,0 +1,6 @@
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-snowflake==0.2.3
+pydantic>=2.0
+fastmcp>=2.0.0
+snowflake-connector-python>=3.5.0
