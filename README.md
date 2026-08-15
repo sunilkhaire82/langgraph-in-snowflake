@@ -54,11 +54,14 @@ schema = "AGENTS"
 
 ### 2. Fill in the `.env` file
 
-Copy and edit the `.env` file with your Snowflake details:
+Copy the example file to `.env`, then edit it with your Snowflake details:
 
 ```bash
-cp .env .env  # already exists, just edit it
+cp example.env .env   # then edit .env
 ```
+
+`.env` is git-ignored, so your real values are never committed. The committed
+`example.env` only contains placeholders.
 
 Required values to fill in:
 
